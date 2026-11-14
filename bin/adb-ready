@@ -12,6 +12,22 @@ adb start-server >/dev/null 2>&1
 for _ in 1 2 3 4 5 6 7 8 9 10; do ready && exit 0; sleep 1; done
 # No device: try the Wireless debugging service of this phone (a service on this network or on localhost).
 svc=$(adb mdns services 2>/dev/null | awk '/_adb-tls-connect/ {print $NF; exit}')
+# No mDNS answer (seen after an OS update): scan the Wireless debugging port range on this phone, as adb connect accepts it.
+if [ -z "$svc" ] && command -v python3 >/dev/null; then
+  for port in $(python3 -c "
+import asyncio
+async def c(p, s, o):
+    async with s:
+        try: _, w = await asyncio.wait_for(asyncio.open_connection('127.0.0.1', p), 0.3); w.close(); o.append(p)
+        except Exception: pass
+async def m():
+    s = asyncio.Semaphore(400); o = []
+    await asyncio.gather(*[c(p, s, o) for p in range(30000, 50001)]); print(*sorted(o))
+asyncio.run(m())" 2>/dev/null); do
+    timeout 5 adb connect "127.0.0.1:$port" 2>/dev/null | grep -q '^connected' && { svc="127.0.0.1:$port"; break; }
+    adb disconnect "127.0.0.1:$port" >/dev/null 2>&1
+  done
+fi
 if [ -n "$svc" ]; then
   adb connect "$svc" >/dev/null 2>&1
   adb -s "$svc" tcpip 5555 >/dev/null 2>&1 && sleep 2 && adb connect localhost:5555 >/dev/null 2>&1
