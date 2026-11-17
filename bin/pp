@@ -233,7 +233,9 @@ case "$cmd" in
     else
       # No termux-api here (the app's Linux system): the keyboard layer. Spaces need %s, and some characters are lost.
       echo "pp: no termux-api: typing through the keyboard" >&2
-      adb shell $INPUT text "$(printf '%s' "$1" | sed 's/ /%s/g')"
+      # Single quotes for the phone shell: ( ) ` $ & ; went to sh as code. Was: "syntax error: unexpected '('".
+      q=$(printf '%s' "$1" | sed "s/ /%s/g; s/'/'\\\\''/g")
+      adb shell "$INPUT text '$q'"
     fi ;;
   key)
     need_front
