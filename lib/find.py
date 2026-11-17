@@ -14,10 +14,12 @@ xml = sys.stdin.read()
 nodes = []
 for n in re.finditer(r"<node [^>]*>", xml):
     s = n.group(0)
-    t = re.search(r' text="([^"]*)"', s)
-    d = re.search(r'content-desc="([^"]*)"', s)
+    # uiautomator quotes a value with ' when it holds a ". Was: only "...", so a JSON error text was not seen.
+    t = re.search(r""" text=(?:"([^"]*)"|'([^']*)')""", s)
+    d = re.search(r"""content-desc=(?:"([^"]*)"|'([^']*)')""", s)
     b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', s)
-    nodes.append((html.unescape(t.group(1)) if t else "", html.unescape(d.group(1)) if d else "", b.groups() if b else None))
+    val = lambda m: html.unescape(m.group(1) if m.group(1) is not None else m.group(2)) if m else ""
+    nodes.append((val(t), val(d), b.groups() if b else None))
 
 if mode == "tap":
     nth = int(sys.argv[3]) if len(sys.argv) > 3 else 1
