@@ -2,7 +2,7 @@
 import os
 import re
 
-BEGIN, END = "<!-- whiskerADB: begin -->", "<!-- whiskerADB: end -->"
+BEGIN, END = "<!-- agentADB: begin -->", "<!-- agentADB: end -->"
 BLOCK = f"""{BEGIN}
 ## Android UI checks
 

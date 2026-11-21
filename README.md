@@ -1,4 +1,4 @@
-# whiskerADB
+# agentADB
 
 **Drive an Android app from the command line, on a phone that a person also uses.**
 
@@ -29,8 +29,8 @@ It is made for AI coding agents (Claude Code, Codex, OpenCode and others) that t
 ## Install
 
 ```sh
-git clone https://github.com/spizganed/whiskerADB.git
-cd whiskerADB
+git clone https://github.com/spizganed/agentADB.git
+cd agentADB
 export PATH="$PWD/bin:$PATH"      # add this line to ~/.bashrc to keep it
 export PP_PKG=com.example.app     # your app id: required
 ```

@@ -55,7 +55,7 @@ public class LockedDisplay {
         Object vdm = vdmK.newInstance(svc, shell);
         Class<?> pb = Class.forName("android.companion.virtual.VirtualDeviceParams$Builder");
         Object builder = pb.getConstructor().newInstance();
-        pb.getMethod("setName", String.class).invoke(builder, "meowtty");
+        pb.getMethod("setName", String.class).invoke(builder, "mtty");
         Object params = pb.getMethod("build").invoke(builder);
         Class<?> paramsC = Class.forName("android.companion.virtual.VirtualDeviceParams");
         Object device = vdmC.getMethod("createVirtualDevice", int.class, paramsC).invoke(vdm, assoc, params);
@@ -65,7 +65,7 @@ public class LockedDisplay {
         ht.start();
         ImageReader reader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2);
         reader.setOnImageAvailableListener(r -> { Image i = r.acquireLatestImage(); if (i != null) i.close(); }, new Handler(ht.getLooper()));
-        VirtualDisplayConfig cfg = new VirtualDisplayConfig.Builder("meowtty-vd", w, h, dpi).setSurface(reader.getSurface()).setFlags(flags).build();
+        VirtualDisplayConfig cfg = new VirtualDisplayConfig.Builder("mtty-vd", w, h, dpi).setSurface(reader.getSurface()).setFlags(flags).build();
         Executor ex = Runnable::run;
         Method cvd = device.getClass().getMethod("createVirtualDisplay", VirtualDisplayConfig.class, Executor.class, VirtualDisplay.Callback.class);
         VirtualDisplay vd = (VirtualDisplay) cvd.invoke(device, cfg, ex, null);
