@@ -15,7 +15,7 @@ It is made for AI coding agents (Claude Code, Codex, OpenCode and others) that t
 | `input tap 540 1200` needs the pixel position of a button. Positions change with every layout and screen size. | `pp tap "Save"` finds the button by its **text or description** and taps its centre. |
 | A tap lands on whatever app is in front. The user switched apps: the tap goes into the wrong app. | Every input command first checks that your app is in front. If not, it exits with code 10. |
 | A model needs a screenshot to read the screen. Images cost many tokens. | `pp texts` prints every visible text, one per line. No image is needed. |
-| `input text` drops characters and cannot type spaces and symbols well. | `pp type` pastes through the clipboard: the exact text arrives. |
+| `input text` drops characters and cannot type spaces and symbols well. | `pp type` pastes through the clipboard (with termux-api): the exact text arrives. |
 | You do not know whether a screen has loaded. | `pp wait "Done" 10` waits until a text shows. |
 | A manual accessibility check takes many screenshots. | `pp audit` finds small touch targets and unlabeled controls from the UI tree. No image. |
 
@@ -70,10 +70,12 @@ pp shot                          # take a screenshot; prints the file path
 | `pp front` | Exit code 0 when the app is in front. Prints nothing. |
 | `pp open` | Bring the app to the front. |
 | `pp texts` | List the visible texts and descriptions, one per line. |
-| `pp tap "label"` | Tap the first node whose text or description equals the label exactly. Exit 2 if no node matches. |
+| `pp tap "label" [n]` | Tap the first node (or the n-th) whose text or description equals the label exactly. Exit 2 if no node matches. |
+| `pp tapxy X Y` | Tap a position on the screen that `pp` uses (the second display too). |
+| `pp hold "label" [n]` | Long press a node (about 800 ms). |
 | `pp wait "text" [secs]` | Wait until a text that contains this text shows. Default 20 s. Exit 3 on timeout. |
 | `pp go "label" "text" [secs]` | `tap`, then `wait`. The usual way to move between screens. |
-| `pp type "text"` | Type into the focused field through the clipboard. |
+| `pp type "text"` | Type into the focused field: through the clipboard with termux-api, else through the keyboard layer (some characters are lost). |
 | `pp key NAME` | Send a key: `enter`, `back`, `del`, `paste`, or an Android key code number. |
 | `pp swipe x1 y1 x2 y2` | Swipe between two points. Use it to scroll. |
 | `pp scroll down\|up` | Scroll most of one screen in the middle of the screen. |
@@ -81,6 +83,7 @@ pp shot                          # take a screenshot; prints the file path
 | `pp shot [file]` | Screenshot. Wakes the screen first. Prints the file path. |
 | `pp audit` | List touch targets under 48 dp and controls with no label. |
 | `pp compare a.png b.png` | Print the screen regions that differ between two screenshots. |
+| `pp locked` | Exit code 0 when the phone is locked. |
 | `pp display overlay\|hidden\|locked\|off` | Work on a second display, so the person keeps the phone screen. See below. |
 | `pp perf start\|show` | Frame stats of the app since `start`: frames, slow frames, frame times. Also the app's log lines with the tag `Perf`. |
 | `pp states [file]` | One image of the screen in light mode, dark mode and 200% text. |
@@ -102,7 +105,6 @@ After `pp display overlay` or `pp display hidden`, `open`, `texts`, `tap`, `type
 
 - `overlay`: Android's own simulated display. No download. A small preview window floats over the phone screen.
 - `hidden`: no window. On Android 14 and newer it is the `locked` display below, so it works with the phone locked too; older Android uses scrcpy-server. `open`, `texts`, `tap`, `swipe` and `shot` work. It has no keyboard, so `pp type` types nothing: send text through the app (for example `pt send`). Tested on Android 17.
-- Was: on Android 17 the scrcpy display stopped with the phone locked. Is: `hidden` uses the `locked` display there.
 - A locked phone and no second display: input commands stop with exit code 11 and say to run `pp display hidden`. `pp locked` exits 0 when the phone is locked.
 - `locked`: no window, and it keeps working while the phone is locked. It is a display of a virtual device, with its own power group: the power button sleeps only the phone screen. It makes a companion association for the adb shell once. No keyboard, as `hidden`. Android 14 and newer. Why and how: `research/LOCKED-DISPLAY.md`.
 - Each call is tested on Android 16. `pp states` and `pp audit` still use the phone screen.
@@ -140,18 +142,21 @@ A good loop for an agent: build, install, `pp open`, `pp go ...` through the flo
 - **Where files go.** Screenshots go to `$PP_OUT`. The default is `$TMPDIR/pp`, or `/tmp/pp`. The screen dump on the phone goes to `$PP_PHONE_DIR`, by default `/sdcard/Download/ADB`, not to the root of the shared storage.
 - **Speed.** Each `tap`, `texts` and `wait` poll runs `uiautomator dump`. This takes a moment, so do not poll in a tight loop.
 - **Exact labels.** `tap` needs the full text. Run `pp texts` first to see the exact label.
-- **Webviews and games.** Nodes with no text and no description cannot be found by label. Use `pp swipe` and `adb shell input tap x y` there.
+- **Webviews and games.** Nodes with no text and no description cannot be found by label. Use `pp swipe` and `pp tapxy X Y` there.
 
 ## Files
 
 ```text
 bin/pp        the tool: one bash script
+bin/adb-ready restarts a hung adb server and finds the Wireless debugging port again
 lib/find.py   finds a node in the UI tree by label
 lib/ui.py     audit, compare and the screenshot sheet
 lib/init.py   writes the pp block into AGENTS.md and CLAUDE.md
+lib/hidden.js the hidden display through scrcpy-server (Android 13 and older)
+lib/locked/   the locked display: LockedDisplay.java and its dex
 ```
 
-The whole tool is about 230 lines. Read it before you run it.
+The script is about 310 lines. Read it before you run it.
 
 ## Related
 
