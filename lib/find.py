@@ -1,7 +1,7 @@
 """Reads a uiautomator dump on stdin and prints what the commands need.
 
 find.py tap "label" [n]   prints the centre "x y" of the n-th node (default the first) whose text or content-desc equals the label
-find.py has "text"    exit 0 when a node text contains the text
+find.py has "text"    exit 0 when the text or content-desc of a node contains the text (as texts and tap see it)
 find.py texts         prints each visible text, one per line
 """
 import html
@@ -32,7 +32,8 @@ if mode == "tap":
                 print((x1 + x2) // 2, (y1 + y2) // 2)
                 break
 elif mode == "has":
-    sys.exit(0 if any(arg in text for text, _, _ in nodes) else 1)
+    # Was: the text only, so pp wait missed a node that pp texts lists by its description (a search field).
+    sys.exit(0 if any(arg in text or arg in desc for text, desc, _ in nodes) else 1)
 elif mode == "texts":
     for text, desc, _ in nodes:
         if text or desc:
