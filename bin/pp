@@ -34,7 +34,9 @@
 PKG=${PP_PKG:?pp: set PP_PKG to the app id, for example PP_PKG=com.example.app}
 HERE=$(dirname "$(readlink -f "$0")")
 "$HERE/adb-ready" || exit 1
-OUT=${PP_OUT:-${TMPDIR:-/tmp}/pp}
+# One state folder for each session (mtty sets MTTY_SESSION): two agents never share a display or its files.
+TAG=${PP_SESSION:-${MTTY_SESSION:-}}
+OUT=${PP_OUT:-${TMPDIR:-/tmp}/pp${TAG:+-$TAG}}
 # Files that pp leaves on the phone (the screen dump) go here, not to the root of the shared storage.
 PHONE_DIR=${PP_PHONE_DIR:-/sdcard/Download/ADB}
 mkdir -p "$OUT"
@@ -42,11 +44,20 @@ mkdir -p "$OUT"
 # The second display: its id is in $OUT/display, and the id of SurfaceFlinger (for screencap) in $OUT/display.sf.
 DISP=${PP_DISPLAY:-$(cat "$OUT/display" 2>/dev/null)}
 SF=$(cat "$OUT/display.sf" 2>/dev/null)
+# A display that this session started and that is gone now: stop, never fall back to the phone screen of the user.
+# $OUT/display.want marks a display that this session asked for; display off removes it.
+if [ "$1" != display ] && [ -e "$OUT/display.want" ] && [ -z "${PP_DISPLAY:-}" ]; then
+  if [ -z "$DISP" ] || ! adb shell cmd display get-displays | command grep -q "Display id $DISP:"; then
+    echo "pp: the second display of this session is gone. Run pp display hidden again (or pp display off for the phone screen)." >&2; exit 12
+  fi
+fi
+# The files of the idle watchdog on the phone, one set for each display.
+DL=/data/local/tmp/pp-last-$DISP; DA=/data/local/tmp/pp-asleep-$DISP
 INPUT="input"; [ -n "$DISP" ] && INPUT="input -d $DISP"
 # The idle watchdog sleeps the display group (a flag file marks it). Any command that is not about the display wakes it
 # and marks the use time. KEYCODE_WAKEUP on the display wakes its power group only, not the phone screen.
 if [ -n "$DISP" ] && [ "$1" != display ]; then
-  woke=$(adb shell "date +%s > /data/local/tmp/pp-last; if [ -e /data/local/tmp/pp-asleep ]; then rm -f /data/local/tmp/pp-asleep; input -d $DISP keyevent KEYCODE_WAKEUP; echo woke; fi" | tr -d '\r')
+  woke=$(adb shell "date +%s > $DL; if [ -e $DA ]; then rm -f $DA; input -d $DISP keyevent KEYCODE_WAKEUP; echo woke; fi" | tr -d '\r')
   [ "$woke" = woke ] && sleep 1
 fi
 # PP_HOME=1: the home screen counts as in front too, for widget and tile work. The home app comes from the HOME intent.
@@ -124,11 +135,12 @@ case "$cmd" in
     case "$1" in
       overlay)
         adb shell settings put global overlay_display_devices "${2:-1080x2400/420}"
+        : > "$OUT/overlay"
         sleep 3
         id=$(adb shell cmd display get-displays | command grep -o 'Display id [0-9]*: DisplayInfo{"Overlay' | command grep -o '[0-9]*' | head -1)
         sf=$(adb shell dumpsys SurfaceFlinger --display-id | command grep Overlay | command grep -o '^Display [0-9]*' | command grep -o '[0-9]*')
         [ -n "$id" ] && [ -n "$sf" ] || { echo "pp: the overlay display did not start" >&2; exit 4; }
-        echo "$id" > "$OUT/display"; echo "$sf" > "$OUT/display.sf"; echo "display $id" ;;
+        echo "$id" > "$OUT/display"; echo "$sf" > "$OUT/display.sf"; : > "$OUT/display.want"; echo "display $id" ;;
       hidden)
         # Android 14 and newer: the display of a virtual device, which keeps working while the phone is locked.
         # It costs nothing extra while the phone is awake. Older Android, or a failed start: scrcpy-server.
@@ -145,7 +157,7 @@ case "$cmd" in
         rm -f "$OUT/display" "$OUT/display.sf"
         nohup node "$HERE/../lib/hidden.js" "$jar" "${2:-1080x2400/420}" "$OUT" >"$OUT/hidden.log" 2>&1 &
         echo $! > "$OUT/hidden.pid"
-        for _ in $(seq 40); do [ -s "$OUT/display" ] && { echo "display $(cat "$OUT/display")"; exit 0; }; sleep 1; done
+        for _ in $(seq 40); do [ -s "$OUT/display" ] && { : > "$OUT/display.want"; echo "display $(cat "$OUT/display")"; exit 0; }; sleep 1; done
         echo "pp: the hidden display did not start (see $OUT/hidden.log)" >&2; exit 4 ;;
       locked)
         # A display of a virtual device has its own display group and power group: the power button sleeps only the
@@ -162,20 +174,20 @@ case "$cmd" in
         size=${2:-1080x2400/420}; w=${size%%x*}; rest=${size#*x}; h=${rest%%/*}; dpi=${size##*/}
         rm -f "$OUT/display" "$OUT/display.sf"
         # Flags 0x1449: public, own content only, touch, trusted, always unlocked.
-        nohup adb shell "CLASSPATH=/data/local/tmp/pp-locked.dex exec app_process / LockedDisplay $id $w $h $dpi 1449" >"$OUT/locked.log" 2>&1 &
+        nohup adb shell "CLASSPATH=/data/local/tmp/pp-locked.dex exec app_process / LockedDisplay $id $w $h $dpi 1449 pp-tag-${TAG:-main}" >"$OUT/locked.log" 2>&1 &
         echo $! > "$OUT/locked.pid"
         for _ in $(seq 30); do
           d=$(command grep -o '^display [0-9]*' "$OUT/locked.log" 2>/dev/null | command grep -o '[0-9]*')
           if [ -n "$d" ]; then
             sf=$(adb shell dumpsys SurfaceFlinger --display-id | command grep 'displayName="mtty-vd"' | command grep -o '^Display [0-9]*' | command grep -o '[0-9]*' | head -1)
             [ -n "$sf" ] || { echo "pp: no SurfaceFlinger id for display $d" >&2; exit 4; }
-            echo "$d" > "$OUT/display"; echo "$sf" > "$OUT/display.sf"
+            echo "$d" > "$OUT/display"; echo "$sf" > "$OUT/display.sf"; : > "$OUT/display.want"
             # The watchdog runs on the phone, so no adb traffic keeps the phone awake. PP_IDLE=0: no watchdog.
             idle=${PP_IDLE:-60}
             if [ "$idle" -gt 0 ]; then
               # One watchdog only: end every older one first (each start used to leave one behind). The loop ends when its display is gone:
               # `cmd power sleep` for an id that no longer exists put the whole phone to sleep (the screen locked by itself).
-              adb shell "pkill -f pp-idle.pid; rm -f /data/local/tmp/pp-asleep; date +%s > /data/local/tmp/pp-last; nohup sh -c 'echo \$\$ > /data/local/tmp/pp-idle.pid; while sleep 10; do cmd display get-displays | grep -q \"Display id $d:\" || exit 0; last=\$(cat /data/local/tmp/pp-last 2>/dev/null || echo 0); now=\$(date +%s); if [ \$((now - last)) -gt $idle ] && [ ! -e /data/local/tmp/pp-asleep ]; then cmd power sleep --display-id $d >/dev/null 2>&1; : > /data/local/tmp/pp-asleep; fi; done' >/dev/null 2>&1 &"
+              adb shell "pkill -f pp-idle-$d.pid; rm -f /data/local/tmp/pp-asleep-$d; date +%s > /data/local/tmp/pp-last-$d; nohup sh -c 'echo \$\$ > /data/local/tmp/pp-idle-$d.pid; while sleep 10; do cmd display get-displays | grep -q \"Display id $d:\" || exit 0; last=\$(cat /data/local/tmp/pp-last-$d 2>/dev/null || echo 0); now=\$(date +%s); if [ \$((now - last)) -gt $idle ] && [ ! -e /data/local/tmp/pp-asleep-$d ]; then cmd power sleep --display-id $d >/dev/null 2>&1; : > /data/local/tmp/pp-asleep-$d; fi; done' >/dev/null 2>&1 &"
             fi
             echo "display $d"; exit 0
           fi
@@ -186,16 +198,20 @@ case "$cmd" in
         [ -s "$OUT/hidden.pid" ] && kill "$(cat "$OUT/hidden.pid")" 2>/dev/null
         [ -s "$OUT/locked.pid" ] && kill "$(cat "$OUT/locked.pid")" 2>/dev/null
         # Without a terminal the device side does not end with adb: end it by name. The virtual device and its display go with it.
-        adb shell pkill -f LockedDisplay 2>/dev/null
-        adb shell 'pkill -f pp-idle.pid 2>/dev/null; rm -f /data/local/tmp/pp-idle.pid /data/local/tmp/pp-asleep /data/local/tmp/pp-last' 2>/dev/null
+        # Only the display of this session: other agents keep theirs.
+        adb shell pkill -f "LockedDisplay.*pp-tag-${TAG:-main}" 2>/dev/null
+        [ -n "$DISP" ] && adb shell "pkill -f pp-idle-$DISP.pid 2>/dev/null; rm -f /data/local/tmp/pp-idle-$DISP.pid $DA $DL" 2>/dev/null
+        rm -f "$OUT/display.want"
         rm -f "$OUT/locked.pid"
-        adb shell settings delete global overlay_display_devices >/dev/null
+        # The overlay setting is global: remove it only when this session set it.
+        [ -e "$OUT/overlay" ] && adb shell settings delete global overlay_display_devices >/dev/null
+        rm -f "$OUT/overlay"
         rm -f "$OUT/display" "$OUT/display.sf" "$OUT/hidden.pid" ;;
       sleep) [ -n "$DISP" ] || { echo "pp: no display is on" >&2; exit 1; }
         adb shell cmd display get-displays | command grep -q "Display id $DISP:" || { echo "pp: display $DISP is gone: not sleeping (it would sleep the phone)" >&2; exit 1; }
-        adb shell "cmd power sleep --display-id $DISP >/dev/null 2>&1; : > /data/local/tmp/pp-asleep" ;;
+        adb shell "cmd power sleep --display-id $DISP >/dev/null 2>&1; : > $DA" ;;
       wake) [ -n "$DISP" ] || { echo "pp: no display is on" >&2; exit 1; }
-        adb shell "date +%s > /data/local/tmp/pp-last; rm -f /data/local/tmp/pp-asleep; input -d $DISP keyevent KEYCODE_WAKEUP" ;;
+        adb shell "date +%s > $DL; rm -f $DA; input -d $DISP keyevent KEYCODE_WAKEUP" ;;
       *) echo "pp: display overlay|hidden|locked|sleep|wake|off" >&2; exit 1 ;;
     esac ;;
   texts) dump | python3 "$HERE/../lib/find.py" texts ;;
@@ -249,7 +265,7 @@ case "$cmd" in
       adb exec-out screencap -d "$SF" -p > "$f" || exit 1
       # A sleeping display gives a black picture (a few KB). Wake it, let it draw, and take the picture again.
       if [ "$(wc -c < "$f")" -lt 30000 ]; then
-        adb shell "rm -f /data/local/tmp/pp-asleep; input -d $DISP keyevent KEYCODE_WAKEUP"; sleep 1.2
+        adb shell "rm -f $DA; input -d $DISP keyevent KEYCODE_WAKEUP"; sleep 1.2
         adb exec-out screencap -d "$SF" -p > "$f"
       fi
       echo "$f"; exit
