@@ -164,6 +164,10 @@ The script is about 310 lines. Read it before you run it.
 
 - [skills](https://github.com/spizganed/skills): the `audit-ui` skill uses `pp audit` for its cheap checks.
 
+## For the mtty app: `mtty/`
+
+`pt` types into the terminals and agents of the [mtty](https://github.com/spizganed/mtty) app through its daemon, `px` runs a command in its Linux system, and `mtty/tests` holds the protocol tests of mttyd. Put `mtty/bin` on PATH next to `bin`. See [mtty/README.md](mtty/README.md).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

@@ -1,0 +1,71 @@
+#!/usr/bin/env node
+// pt: talk to mttyd INSIDE the running app, with no keyboard and no clipboard. Debug builds only
+// (the token is read with `adb shell run-as`; a release build refuses that).
+//   pt sessions                     list the sessions
+//   pt new <name> <cwd> <harness> [model]   start a session (PT_HEADLESS=1: chat only; PT_MODE: a permission mode such as bypassPermissions) (cwd is a path inside the app's Linux system, e.g. /root/projects/sandbox)
+//   pt send <session> "text"        type text into a session and press Enter (a paste, so any characters work)
+//   pt capture <session>            print the screen text of a session
+//   pt commands <session>           the slash hints that the app shows for a session
+//   pt kill <session>               end a session
+//   pt watch <session> [secs]       attach and print the chat and usage messages that mttyd sends to the app (default 8 s; PT_RAW=1: the chat messages as JSON)
+//   pt call '<json>' [reply type]   send any message and print the reply as JSON (for example '{"t":"models","harness":"codex"}' models)
+// Set PT_PKG for another app id (default is the debug build, com.spizganed.mtty.dev), PT_PORT for another port (default 18767, the debug build; the release build uses 8767).
+// PT_TOKEN gives the token directly (a release build refuses run-as): read it from ~/.config/mtty/token of its Linux system.
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
+
+const PKG = process.env.PT_PKG || 'com.spizganed.mtty.dev';
+const PORT = process.env.PT_PORT || '18767';
+const MTTYD = process.env.MTTYD_DIR || [`${process.env.HOME}/projects/mtty/mttyd`, `${process.env.HOME}/Projects/mtty/mttyd`, `${process.env.HOME}/projects/Purrminal/mttyd`].find(existsSync);
+// A hung adb server shows the phone as offline: adb-ready restarts it once.
+try { execFileSync('adb-ready', { stdio: 'inherit' }); } catch { process.exit(1); }
+// The Linux system in use (Settings, Linux systems) holds the token: Debian, Ubuntu or Arch.
+const token = process.env.PT_TOKEN || (() => {
+  const prefs = execFileSync('adb', ['shell', `run-as ${PKG} cat shared_prefs/mtty.xml`], { encoding: 'utf8' });
+  const distro = (prefs.match(/name="distro">(\w+)</)?.[1] || 'debian').toLowerCase();
+  return execFileSync('adb', ['shell', `run-as ${PKG} cat files/${distro}/root/.config/mtty/token`], { encoding: 'utf8' }).trim();
+})();
+if (!/^[0-9a-f]{32,}$/.test(token)) { console.error('pt: could not read the token (is this a debug build?)'); process.exit(2); }
+const { WebSocket } = createRequire(`${MTTYD}/package.json`)('ws');
+
+process.stdout.on('error', () => process.exit(0)); // a closed pipe (| head) is not an error
+const [cmd, ...args] = process.argv.slice(2);
+const ws = new WebSocket(`ws://127.0.0.1:${PORT}/?token=${token}`);
+const done = (code = 0) => { ws.close(); setTimeout(() => process.exit(code), 100); };
+// A watch runs as long as asked; every other command gets 2 minutes.
+const timer = setTimeout(() => { console.error('pt: timed out'); done(3); }, cmd === 'watch' ? Math.max(120, Number(args[1] || 8) + 15) * 1000 : 120000);
+const waitFor = type => new Promise(resolve => ws.on('message', (raw, bin) => { if (bin) return; const m = JSON.parse(raw); if (m.t === type) resolve(m); if (m.t === 'error') { console.error('pt: ' + m.error); done(4); } }));
+
+ws.on('error', e => { console.error('pt: ' + e.message); process.exit(2); });
+ws.on('open', async () => {
+  if (cmd === 'sessions') { const p = waitFor('sessions'); ws.send(JSON.stringify({ t: 'list' })); const m = await p; for (const s of m.list) console.log(`${s.name}\t${s.window}\t${s.path}\t${s.title || ""}`); }
+  else if (cmd === 'new') { const p = waitFor('created'); ws.send(JSON.stringify({ t: 'new', name: args[0], cwd: args[1], harness: args[2] || 'shell', model: args[3], ...(process.env.PT_HEADLESS ? { headless: true } : {}), ...(process.env.PT_MODE ? { mode: process.env.PT_MODE } : {}) })); console.log((await p).session); }
+  else if (cmd === 'send') { ws.send(JSON.stringify({ t: 'send', session: args[0], text: args[1] })); await new Promise(r => setTimeout(r, 300)); }
+  else if (cmd === 'capture') { const p = waitFor('capture'); ws.send(JSON.stringify({ t: 'capture', session: args[0], lines: 200 })); console.log((await p).text); }
+  else if (cmd === 'call') { const msg = JSON.parse(args[0]); const p = waitFor(args[1] || msg.t); ws.send(JSON.stringify(msg)); console.log(JSON.stringify(await p)); }
+  else if (cmd === 'commands') { // the slash hints that the app shows for a session
+    ws.send(JSON.stringify({ t: 'attach', session: args[0], cols: 80, rows: 24 }));
+    await new Promise(r => setTimeout(r, 1500));
+    const p = waitFor('commands'); ws.send(JSON.stringify({ t: 'commands' }));
+    for (const c of (await p).list) console.log(`/${c.name}\t${c.description}`);
+  }
+  else if (cmd === 'watch') {
+    const secs = Number(args[1] || 8);
+    ws.on('message', (raw, bin) => {
+      if (bin) return;
+      const m = JSON.parse(raw);
+      if (m.t === 'working') console.log('working: ' + JSON.stringify(m.working));
+      if (m.t === 'queue') console.log('queue: ' + (m.list || []).map(q => q.text).join(' | '));
+      if (m.t === 'chat' && process.env.PT_RAW) console.log('chat: ' + JSON.stringify(m));
+      else if (m.t === 'chat') console.log(`chat${m.reset ? ' (reset)' : ''}: ${(m.items || []).map(i => `${i.kind}:${String(i.text || i.name || '').slice(0, 40)}`).join(' | ') || '(none)'}`);
+      if (m.t === 'usage') console.log('usage: ' + JSON.stringify(m.usage));
+    });
+    ws.send(JSON.stringify({ t: 'attach', session: args[0], cols: 80, rows: 24 }));
+    await new Promise(r => setTimeout(r, secs * 1000));
+  }
+  else if (cmd === 'kill') { ws.send(JSON.stringify({ t: 'kill', session: args[0] })); await new Promise(r => setTimeout(r, 300)); }
+  else { console.error('usage: pt sessions | new <name> <cwd> <harness> | send <session> "text" | capture <session> | commands <session> | watch <session> [secs] | kill <session>'); clearTimeout(timer); return done(1); }
+  clearTimeout(timer);
+  done();
+});

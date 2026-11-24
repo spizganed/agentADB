@@ -1,0 +1,24 @@
+#!/bin/sh
+# px <command...>   run a command inside the Linux system of the dev app (run-as; debug build only)
+#   px 'ls /root | head'     px 'tailscaled --version'
+# The command goes through base64, so quotes, pipes and $ work as you type them. Set PP_PKG for another app id.
+# It runs the system the way the app does: fastroot for files/ubuntu, through run-in.sh of the mtty repo
+# (tools/fastroot/bench/run-in.sh), copied to the cache of the app. PX_DISTRO=debian|fedora|arch and PX_MODE=proot pick
+# another system or the old engine. Was: proot on files/debian only, which the dev app no longer has.
+PKG=${PP_PKG:-com.spizganed.mtty.dev}
+RUNIN=${PX_RUNIN:-$HOME/projects/mtty/tools/fastroot/bench/run-in.sh}
+[ -f "$RUNIN" ] || { echo "px: no run-in.sh at $RUNIN (set PX_RUNIN)" >&2; exit 1; }
+NLD=$(adb shell pm path "$PKG" | sed 's|package:||; s|/base.apk||' | tr -d '\r')/lib/arm64
+DISTRO=${PX_DISTRO:-}
+if [ -z "$DISTRO" ]; then
+  for d in ubuntu debian fedora arch; do
+    adb shell "run-as $PKG test -d files/$d/usr" 2>/dev/null && { DISTRO=$d; break; }
+  done
+fi
+[ -n "$DISTRO" ] || { echo "px: no Linux system in $PKG" >&2; exit 1; }
+MODE=${PX_MODE:-fastroot}
+# The script goes to the cache of the app once per run: run-as cannot read /data/local/tmp files of the shell user by path.
+adb push "$RUNIN" /data/local/tmp/px-run-in.sh >/dev/null || exit 1
+adb shell "cat /data/local/tmp/px-run-in.sh | run-as $PKG sh -c 'cat > cache/px-run-in.sh'; rm -f /data/local/tmp/px-run-in.sh"
+B64=$(printf '%s' "$*" | base64 | tr -d '\n')
+adb shell "run-as $PKG sh cache/px-run-in.sh $MODE $DISTRO $NLD \"\$(echo $B64 | base64 -d)\""
