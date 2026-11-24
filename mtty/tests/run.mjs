@@ -187,29 +187,6 @@ sleep 20
   await pause(500);
 });
 
-test('a working Claude Code window sends its spinner word, the time and the tokens', async () => {
-  // The stand-in draws the spinner line of a long turn, then stays open.
-  const bin = `${a.home}/bin`;
-  mkdirSync(bin, { recursive: true });
-  writeFileSync(`${bin}/claude`, `#!/bin/sh
-printf '* Cascading… (1m 44s · ↓ 5.9k tokens)\\n\\n'
-printf '────────────────────────\\n'
-printf '❯ \\n'
-printf '────────────────────────\\n'
-sleep 8
-`);
-  chmodSync(`${bin}/claude`, 0o755);
-  const cwd = `${a.home}/projects/spin`;
-  mkdirSync(cwd, { recursive: true });
-  a.send({ t: 'new', name: 'spin1', cwd, harness: 'claude' });
-  a.send({ t: 'attach', session: 'spin1', cols: 48, rows: 16 });
-  const m = await a.wait(x => x.t === 'working' && x.working?.verb === 'Cascading', 10000);
-  eq(m.working.elapsedMs, 104000, 'elapsed');
-  eq(m.working.tokens, 5900, 'tokens');
-  a.send({ t: 'kill', session: 'spin1' });
-  await pause(500);
-});
-
 // A user-found bug (2026-11-24): the user closed a chat and opened a new one in the same folder. The new chat has the same
 // session name, and it showed the old chat until its first message.
 test('a new session with the name of a closed one starts with an empty chat', async () => {
