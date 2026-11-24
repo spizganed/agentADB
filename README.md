@@ -106,6 +106,7 @@ After `pp display overlay` or `pp display hidden`, `open`, `texts`, `tap`, `type
 - `overlay`: Android's own simulated display. No download. A small preview window floats over the phone screen.
 - `hidden`: no window. On Android 14 and newer it is the `locked` display below, so it works with the phone locked too; older Android uses scrcpy-server. `open`, `texts`, `tap`, `swipe` and `shot` work. It has no keyboard window, but `pp type` works through `input text` into the focused field (some characters are lost; no clipboard). Tested on Android 17.
 - A locked phone and no second display: input commands stop with exit code 11 and say to run `pp display hidden`. `pp locked` exits 0 when the phone is locked.
+- The hidden display has its own focus and cannot take the top focus (`VIRTUAL_DISPLAY_FLAG_OWN_FOCUS` and `STEAL_TOP_FOCUS_DISABLED`, Android 14 and newer): a `pp open` or `pp tap` there does not close the keyboard of the user on the phone screen.
 - `locked`: no window, and it keeps working while the phone is locked. It is a display of a virtual device, with its own power group: the power button sleeps only the phone screen. It makes a companion association for the adb shell once. No keyboard window, as `hidden`. Android 14 and newer. Why and how: `research/LOCKED-DISPLAY.md`.
 - Each call is tested on Android 16. `pp states` and `pp audit` still use the phone screen.
 
