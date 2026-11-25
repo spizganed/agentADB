@@ -1,7 +1,7 @@
 // Protocol tests for mtty's mttyd. Usage: node tests/run.mjs [path to the mttyd folder]
 // They run an isolated mttyd (new HOME, other port, own tmux socket). They never touch your real login or sessions.
 import { resolve } from 'node:path';
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { startMttyd } from '../lib/mttyd.mjs';
 
@@ -273,6 +273,16 @@ printf '\\033[2J\\033[H' # the turn is over: the screen of the agent goes away
   await a.wait(x => x.t === 'queue' && (x.list || []).length === 0, 20000);
   a.send({ t: 'kill', session: 'q1' });
   await pause(500);
+});
+
+test('a queue that a crash left in queue.json loads, and the queue of a closed chat goes (crash of 2026-11-25)', async () => {
+  const queue = JSON.stringify({ gone: [{ id: 'q7', text: 'the red text', files: [] }] });
+  const b = await startMttyd({ dir, files: { '.config/mtty/queue.json': queue } });
+  try {
+    let left = queue;
+    for (let i = 0; i < 10 && left.includes('gone'); i++) { await pause(1000); left = readFileSync(`${b.home}/.config/mtty/queue.json`, 'utf8'); }
+    eq(JSON.parse(left), {}, 'the queue of a chat that no longer exists');
+  } finally { await b.stop(); }
 });
 
 test('a Claude Code account is added, listed as a harness, refused twice and removed', async () => {

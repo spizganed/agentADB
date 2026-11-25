@@ -1,9 +1,9 @@
 // Starts an isolated mttyd and gives a small client for its WebSocket protocol.
 // The mttyd gets a new empty HOME, its own port and its own tmux socket (MTTY_SOCK), so it never touches a real mttyd or its sessions.
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 
 /** A second WebSocket connection to the same mttyd. */
@@ -15,8 +15,10 @@ export async function startSecond(client) {
   return { send: m => ws.send(JSON.stringify(m)), close: () => ws.close() };
 }
 
-export async function startMttyd({ dir, port = 20000 + Math.floor(Math.random() * 20000) } = {}) {
+// [files]: { path in the new home: text }, written before mttyd starts (a state file that a run before left, for example).
+export async function startMttyd({ dir, port = 20000 + Math.floor(Math.random() * 20000), files = {} } = {}) {
   const home = mkdtempSync(join(tmpdir(), 'litterbox-'));
+  for (const [path, text] of Object.entries(files)) { mkdirSync(dirname(join(home, path)), { recursive: true }); writeFileSync(join(home, path), text); }
   const sock = `litterbox-${port}`;
   // ~/bin of the new home comes first: a test can put a stand-in for an agent there.
   const env = { ...process.env, HOME: home, PATH: `${home}/bin:${process.env.PATH}`, MTTY_PORT: String(port), MTTY_SOCK: sock };
