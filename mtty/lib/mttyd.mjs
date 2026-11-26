@@ -12,7 +12,21 @@ export async function startSecond(client) {
   const { WebSocket } = createRequire(join(client.dir, 'package.json'))('ws');
   const ws = new WebSocket(`ws://127.0.0.1:${client.port}/?token=${token}`);
   await new Promise((resolve, reject) => { ws.on('open', resolve); ws.on('error', reject); });
-  return { send: m => ws.send(JSON.stringify(m)), close: () => ws.close() };
+  const waiters = [];
+  ws.on('message', (raw, isBinary) => {
+    if (isBinary) return;
+    const m = JSON.parse(raw);
+    for (const w of [...waiters]) if (w.test(m)) { waiters.splice(waiters.indexOf(w), 1); w.resolve(m); }
+  });
+  return {
+    send: m => ws.send(JSON.stringify(m)),
+    close: () => ws.close(),
+    /** Waits for the next message that matches `test` (a function). */
+    wait: (test, ms = 10000) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timed out waiting for a message')), ms);
+      waiters.push({ test, resolve: m => { clearTimeout(timer); resolve(m); } });
+    }),
+  };
 }
 
 // [files]: { path in the new home: text }, written before mttyd starts (a state file that a run before left, for example).

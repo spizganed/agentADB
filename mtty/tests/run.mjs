@@ -1,7 +1,7 @@
 // Protocol tests for mtty's mttyd. Usage: node tests/run.mjs [path to the mttyd folder]
 // They run an isolated mttyd (new HOME, other port, own tmux socket). They never touch your real login or sessions.
 import { resolve } from 'node:path';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { startMttyd } from '../lib/mttyd.mjs';
 
@@ -311,6 +311,53 @@ test('a schedule is saved, listed with its next run, refused when bad, and remov
   const bad = await a.ask({ t: 'schedule-save', schedule: { cwd: 'x', harness: 'shell', prompt: '', repeat: 'daily', at: '7' } }, 'error');
   ok(/cannot run/.test(bad.error), 'a bad schedule is refused');
   eq((await a.ask({ t: 'schedule-remove', id: m.list[0].id }, 'schedules')).list.length, 0, 'removed');
+});
+
+test('two links on one chat share its reader: a link that joins late gets the chat, a new line reaches both', async () => {
+  const bin = `${a.home}/bin`;
+  mkdirSync(bin, { recursive: true });
+  const cwd = `${a.home}/projects/shared`;
+  mkdirSync(cwd, { recursive: true });
+  const tdir = `${a.home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}`;
+  mkdirSync(tdir, { recursive: true });
+  const file = `${tdir}/shared-chat.jsonl`;
+  const line = (uuid, text) => JSON.stringify({ type: 'user', uuid, timestamp: new Date().toISOString(), cwd, message: { role: 'user', content: text } }) + '\n';
+  writeFileSync(file, line('s1', 'the first message'));
+  writeFileSync(`${bin}/claude`, `#!/bin/sh\nprintf '{"transcript_path":"${file}"}' > "$MTTY_STATUS"\nprintf '❯ \\n'\nsleep 60\n`);
+  chmodSync(`${bin}/claude`, 0o755);
+  const has = text => m => m.t === 'chat' && (m.items || []).some(i => (i.text || '').includes(text));
+  const first = a.wait(has('the first message'), 8000);
+  a.send({ t: 'new', name: 'shared1', cwd, harness: 'claude' });
+  a.send({ t: 'follow', session: 'shared1' });
+  await first;
+  const { startSecond } = await import('../lib/mttyd.mjs');
+  const other = await startSecond(a);
+  try {
+    const replay = other.wait(has('the first message'), 5000);
+    other.send({ t: 'follow', session: 'shared1' });
+    const r = await replay;
+    ok(r.reset, 'the late link got the chat as a reset');
+    eq(r.session, 'shared1', 'the replay names its session');
+    const inA = a.wait(has('the second message'), 5000), inB = other.wait(has('the second message'), 5000);
+    appendFileSync(file, line('s2', 'the second message'));
+    await Promise.all([inA, inB]);
+  } finally { other.close(); a.send({ t: 'kill', session: 'shared1' }); await a.wait(m => m.t === 'killed', 5000); }
+});
+
+test('an idle watcher still sends the done alert at once when the Stop hook writes', async () => {
+  const bin = `${a.home}/bin`;
+  const cwd = `${a.home}/projects/idle`;
+  mkdirSync(cwd, { recursive: true });
+  // The stand-in waits until the watcher is in its slow look (30 s with no action), then writes a Stop event as the hook does.
+  writeFileSync(`${bin}/claude`, `#!/bin/sh\nprintf '{}' > "$MTTY_STATUS"\nprintf '❯ \\n'\nsleep 36\necho '{"hook_event_name":"Stop"}' >> "$MTTY_STATUS.events"\ndate +%s%N > "$MTTY_STATUS.stopped"\nsleep 30\n`);
+  chmodSync(`${bin}/claude`, 0o755);
+  a.send({ t: 'new', name: 'idle1', cwd, harness: 'claude' });
+  const done = await a.wait(m => m.t === 'alert' && m.session === 'idle1' && m.kind === 'done', 45000);
+  const at = Date.now();
+  const stopped = Number(readFileSync(`${a.home}/.cache/mtty/status/idle1.claude.json.stopped`, 'utf8')) / 1e6;
+  ok(done && at - stopped < 1000, `the alert came ${Math.round(at - stopped)} ms after the Stop event`);
+  a.send({ t: 'kill', session: 'idle1' });
+  await a.wait(m => m.t === 'killed', 5000);
 });
 
 test('an unknown message gets an error', async () => {
