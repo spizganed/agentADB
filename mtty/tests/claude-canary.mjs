@@ -89,6 +89,14 @@ open('${png}','wb').write(b'\\x89PNG\\r\\n\\x1a\\n'+c(b'IHDR',struct.pack('>IIBB
   const stream = () => { const f = readdirSync(`${a.home}/.cache/mtty/status`).find(n => n.startsWith('t3.') && n.endsWith('.json.stream')); return f ? readFileSync(`${a.home}/.cache/mtty/status/${f}`, 'utf8') : ''; };
   check('a first message with a large picture gets an answer', !!(await until(() => /"type":"result"/.test(stream()) && /red/i.test(stream()), 90000)), stream().slice(-300));
 
+  // 5c. The phone tools reach mttyd over HTTP (no node process for each chat) and name the chat of the call.
+  const t4 = await a.ask({ t: 'new', name: 't4', cwd, harness: 'claude', mode: 'bypassPermissions', model: 'haiku', headless: true }, 'created', 60000);
+  const call = a.wait(m => m.t === 'api' && m.cmd === 'battery', 120000).catch(() => null);
+  a.send({ t: 'send', session: t4.session, text: 'Call the tool mcp__phone__battery once, then say done.' });
+  const got = await call;
+  check('a phone tool call of Claude Code reaches mttyd with its chat', got?.session === t4.session, JSON.stringify(got));
+  if (got) a.send({ t: 'api', req: got.req, ok: true, text: '80%' });
+
   // 6. The report has the screen and the version.
   const rep = await a.ask({ t: 'report', session: 't1' }, 'reported', 20000);
   check('the report names the version', /version \d+\.\d+\.\d+/.test(readFileSync(rep.path, 'utf8')));
