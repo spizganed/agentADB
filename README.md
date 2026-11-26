@@ -72,6 +72,7 @@ pp shot                          # take a screenshot; prints the file path
 | `pp texts` | List the visible texts and descriptions, one per line. |
 | `pp tap "label" [n]` | Tap the first node (or the n-th) whose text or description equals the label exactly. Exit 2 if no node matches. |
 | `pp tapxy X Y` | Tap a position on the screen that `pp` uses (the second display too). |
+| `pp xy "label" [n]` | Print the centre `x y` of a node. A later `pp tapxy` taps it with no dump in between (a timing test). |
 | `pp hold "label" [n]` | Long press a node (about 800 ms). |
 | `pp wait "text" [secs]` | Wait until a text that contains this text shows. Default 20 s. Exit 3 on timeout. |
 | `pp go "label" "text" [secs]` | `tap`, then `wait`. The usual way to move between screens. |

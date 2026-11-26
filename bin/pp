@@ -229,6 +229,12 @@ case "$cmd" in
     xy=$(dump | python3 "$HERE/../lib/find.py" tap "$1" "${2:-1}")
     [ -n "$xy" ] || { echo "pp: no node: $1${2:+ (number $2)}" >&2; exit 2; }
     adb shell $INPUT tap $xy ;;
+  xy)
+    # Prints the centre "x y" of a node by its text or description, for a tapxy that must come with no dump before it.
+    need_front
+    xy=$(dump | python3 "$HERE/../lib/find.py" tap "$1" "${2:-1}")
+    [ -n "$xy" ] || { echo "pp: no node: $1${2:+ (number $2)}" >&2; exit 2; }
+    echo "$xy" ;;
   hold)
     # A long press on a node by its text or description (about 800 ms): a swipe that does not move.
     need_front
