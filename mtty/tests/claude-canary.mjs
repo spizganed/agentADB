@@ -2,7 +2,7 @@
 // Run it after every update of Claude Code: node tests/claude-canary.mjs [path to the mttyd folder]
 // It copies the login of ~/.claude-b (or $CLAUDE_CANARY_CREDENTIALS) into an isolated HOME and deletes it at the end.
 // It uses the model Haiku: a few small requests.
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { startMttyd } from '../lib/mttyd.mjs';
@@ -73,6 +73,21 @@ try {
   a.send({ t: 'answer', session: 't2', index: 0 });
   check('headless command ran', !!(await until(() => existsSync(`${cwd}/headless.txt`), 20000)));
   check('headless turn ends', !!(await until(async () => (await hs())?.busy === false, 40000)));
+
+  // 5b. A first message with a picture larger than the pipe buffer (64 KiB) goes in before Claude Code reads its input.
+  // Bug of 2026-11-26: mttyd gave up after 2 s, Claude Code got a cut line and stopped.
+  // A slow SessionStart hook (like the hooks of a real setup) makes Claude Code read its input late.
+  writeFileSync(`${a.home}/.claude/settings.json`, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'sleep 6' }] }] } }));
+  await a.ask({ t: 'new', name: 't3', cwd, harness: 'claude', mode: 'manual', model: 'haiku', headless: true }, 'created', 60000);
+  const png = `${cwd}/noise.png`;
+  execSync(`python3 -c "import os,zlib,struct
+w=h=420
+raw=b''.join(b'\\0'+bytes(v for _ in range(w) for v in (200+os.urandom(1)[0]%56,os.urandom(1)[0]%40,os.urandom(1)[0]%40)) for _ in range(h))
+c=lambda t,d:struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d))
+open('${png}','wb').write(b'\\x89PNG\\r\\n\\x1a\\n'+c(b'IHDR',struct.pack('>IIBBBBB',w,h,8,2,0,0,0))+c(b'IDAT',zlib.compress(raw))+c(b'IEND',b''))"`);
+  a.send({ t: 'send', session: 't3', text: 'Which colour fills this picture? Answer with one word.', files: [png] });
+  const stream = () => { const f = readdirSync(`${a.home}/.cache/mtty/status`).find(n => n.startsWith('t3.') && n.endsWith('.json.stream')); return f ? readFileSync(`${a.home}/.cache/mtty/status/${f}`, 'utf8') : ''; };
+  check('a first message with a large picture gets an answer', !!(await until(() => /"type":"result"/.test(stream()) && /red/i.test(stream()), 90000)), stream().slice(-300));
 
   // 6. The report has the screen and the version.
   const rep = await a.ask({ t: 'report', session: 't1' }, 'reported', 20000);
