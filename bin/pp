@@ -94,17 +94,20 @@ scroll() {
 dump() {
   # One dump file for each session. uiautomator serves one client at a time: a dump of another agent makes ours fail, so try 3 times.
   local X="$PHONE_DIR/pp${TAG:+-$TAG}.xml" try
+  local err
   for try in 1 2 3; do
     adb shell "mkdir -p $PHONE_DIR; rm -f $X"
-    if [ -n "$DISP" ]; then adb shell uiautomator dump --windows "$X" >/dev/null 2>&1
-    else adb shell uiautomator dump "$X" >/dev/null 2>&1; fi
+    if [ -n "$DISP" ]; then err=$(adb shell uiautomator dump --windows "$X" 2>&1)
+    else err=$(adb shell uiautomator dump "$X" 2>&1); fi
     adb shell "[ -s $X ]" && break
+    # A failed dump names its cause here (dump-errors.log in the output folder): a test that fails on "no node" shows why.
+    echo "$(date '+%F %T') pp $PP_CMD_LINE: try $try: $(printf '%s' "$err" | tr '\n' ' ')" >> "$OUT/dump-errors.log"
     sleep 0.8
   done
   if [ -n "$DISP" ]; then
     # --display alone can return the phone screen. --windows lists every display: keep the block of ours.
     xml=$(adb shell cat "$X" | python3 -c 'import re,sys; m = re.search(r"<display id=\"%s\">(.*?)</display>" % sys.argv[1], sys.stdin.read(), re.S); print(m.group(1) if m else "")' "$DISP")
-    printf '%s' "$xml" | command grep -q "package=\"$PKG\"" || { echo "pp: display $DISP shows no node of $PKG" >&2; return 1; }
+    printf '%s' "$xml" | command grep -q "package=\"$PKG\"" || { echo "$(date '+%F %T') pp $PP_CMD_LINE: display $DISP shows no node of $PKG (displays in the dump: $(adb shell cat "$X" | command grep -o '<display id="[0-9]*"' | tr -dc '0-9 '))" >> "$OUT/dump-errors.log"; echo "pp: display $DISP shows no node of $PKG" >&2; return 1; }
   else
     xml=$(adb shell cat "$X")
   fi
