@@ -16,6 +16,7 @@ pt send linktest 'any text & symbols'         # paste the text into the session 
 pt capture linktest                           # print the screen text
 pt kill linktest
 pt watch linktest 10                          # attach and print the chat and usage messages mttyd sends to the app
+PT_TIME=1 pt watch linktest 60                # the same with the time in ms before each line; alerts (done, waiting) too
 pt call '{"t":"models","harness":"codex"}' models   # send any message, print the reply
 ```
 

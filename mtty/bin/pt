@@ -52,14 +52,17 @@ ws.on('open', async () => {
   }
   else if (cmd === 'watch') {
     const secs = Number(args[1] || 8);
+    // PT_TIME=1: each line starts with the time in ms (Date.now), to measure how late a message comes.
+    const out = s => console.log(process.env.PT_TIME ? `${Date.now()} ${s}` : s);
     ws.on('message', (raw, bin) => {
       if (bin) return;
       const m = JSON.parse(raw);
-      if (m.t === 'working') console.log('working: ' + JSON.stringify(m.working));
-      if (m.t === 'queue') console.log('queue: ' + (m.list || []).map(q => q.text).join(' | '));
-      if (m.t === 'chat' && process.env.PT_RAW) console.log('chat: ' + JSON.stringify(m));
-      else if (m.t === 'chat') console.log(`chat${m.reset ? ' (reset)' : ''}: ${(m.items || []).map(i => `${i.kind}:${String(i.text || i.name || '').slice(0, 40)}`).join(' | ') || '(none)'}`);
-      if (m.t === 'usage') console.log('usage: ' + JSON.stringify(m.usage));
+      if (m.t === 'alert') out(`alert: ${m.kind} ${m.session} ${m.text || ''}`);
+      if (m.t === 'working') out('working: ' + JSON.stringify(m.working));
+      if (m.t === 'queue') out('queue: ' + (m.list || []).map(q => q.text).join(' | '));
+      if (m.t === 'chat' && process.env.PT_RAW) out('chat: ' + JSON.stringify(m));
+      else if (m.t === 'chat') out(`chat${m.reset ? ' (reset)' : ''}: ${(m.items || []).map(i => `${i.kind}:${String(i.text || i.name || '').slice(0, 40)}`).join(' | ') || '(none)'}`);
+      if (m.t === 'usage') out('usage: ' + JSON.stringify(m.usage));
     });
     ws.send(JSON.stringify({ t: 'attach', session: args[0], cols: 80, rows: 24 }));
     await new Promise(r => setTimeout(r, secs * 1000));
